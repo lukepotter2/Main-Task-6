@@ -1,0 +1,287 @@
+//=====[#include guards - begin]===============================================
+
+#ifndef _USER_INTERFACE_H_
+#define _USER_INTERFACE_H_
+
+//=====[Declaration of public defines]=========================================
+
+//=====[Declaration of public data types]======================================
+
+//=====[Declarations (prototypes) of public functions]=========================
+
+void userInterfaceInit();
+void userInterfaceUpdate();
+bool userInterfaceCodeCompleteRead();
+void userInterfaceCodeCompleteWrite( bool state );
+
+bool incorrectCodeStateRead();
+void incorrectCodeStateWrite( bool state );
+
+bool systemBlockedStateRead();
+void systemBlockedStateWrite( bool state );
+
+void userInterfaceWarningWrite( const char* warningMessage );
+void userInterfaceMessageWrite( const char* message );
+
+//=====[#include guards - end]=================================================
+
+#endif // _USER_INTERFACE_H_
+
+// Start of user_interface.cpp
+
+//=====[Libraries]=============================================================
+
+#include "mbed.h"
+#include "arm_book_lib.h"
+
+#include "user_interface.h"
+
+#include "code.h"
+#include "siren.h"
+#include "smart_home_system.h"
+#include "fire_alarm.h"
+#include "date_and_time.h"
+#include "temperature_sensor.h"
+#include "gas_sensor.h"
+#include "matrix_keypad.h"
+#include "display.h"
+
+//=====[Declaration of private defines]========================================
+
+#define DISPLAY_REFRESH_TIME_MS 1000
+#define TEMP_SAFE_LIMIT 40.0
+#define MESSAGE_DISPLAY_TIME_MS 3000
+
+//=====[Declaration of private data types]=====================================
+
+//=====[Declaration and initialization of public global objects]===============
+
+DigitalOut incorrectCodeLed(LED3);
+DigitalOut systemBlockedLed(LED2);
+
+//=====[Declaration of external public global variables]=======================
+
+//=====[Declaration and initialization of public global variables]=============
+
+char codeSequenceFromUserInterface[CODE_NUMBER_OF_KEYS];
+
+//=====[Declaration and initialization of private global variables]============
+
+static bool incorrectCodeState = OFF;
+static bool systemBlockedState = OFF;
+
+static bool codeComplete = false;
+static int numberOfCodeChars = 0;
+
+static char warningMessage[20] = "";
+static char tempMessage[20] = "";
+static int tempMessageTime = 0;
+
+//=====[Declarations (prototypes) of private functions]========================
+
+static void userInterfaceMatrixKeypadUpdate();
+static void incorrectCodeIndicatorUpdate();
+static void systemBlockedIndicatorUpdate();
+
+static void userInterfaceDisplayInit();
+static void userInterfaceDisplayUpdate();
+
+//=====[Implementations of public functions]===================================
+
+void userInterfaceInit()
+{
+    incorrectCodeLed = OFF;
+    systemBlockedLed = OFF;
+    matrixKeypadInit( SYSTEM_TIME_INCREMENT_MS );
+    userInterfaceDisplayInit();
+}
+
+void userInterfaceUpdate()
+{
+    userInterfaceMatrixKeypadUpdate();
+    incorrectCodeIndicatorUpdate();
+    systemBlockedIndicatorUpdate();
+    userInterfaceDisplayUpdate();
+}
+
+bool incorrectCodeStateRead()
+{
+    return incorrectCodeState;
+}
+
+void incorrectCodeStateWrite( bool state )
+{
+    incorrectCodeState = state;
+}
+
+bool systemBlockedStateRead()
+{
+    return systemBlockedState;
+}
+
+void systemBlockedStateWrite( bool state )
+{
+    systemBlockedState = state;
+}
+
+bool userInterfaceCodeCompleteRead()
+{
+    return codeComplete;
+}
+
+void userInterfaceCodeCompleteWrite( bool state )
+{
+    codeComplete = state;
+}
+
+void userInterfaceWarningWrite( const char* warningMessage )
+{
+    strcpy( ::warningMessage, warningMessage );
+}
+
+void userInterfaceMessageWrite( const char* message )
+{
+    strcpy( tempMessage, message );
+    tempMessageTime = 0;
+}
+
+//=====[Implementations of private functions]==================================
+
+static void userInterfaceMatrixKeypadUpdate()
+{
+    static int numberOfHashKeyReleased = 0;
+    char keyReleased = matrixKeypadUpdate();
+
+    if( keyReleased != '\0' ) {
+        if( keyReleased == '2' ) {
+            char msg[20];
+            float gasReading = gasSensorRead();
+            bool gasDetected = gasReading > GAS_SAFE_LIMIT;
+            sprintf(msg, "Gas: %.2f %s", gasReading, gasDetected ? "Det" : "Safe");
+            userInterfaceMessageWrite( msg );
+        } else if( keyReleased == '3' ) {
+            if( overTemperatureDetectorStateRead() ) {
+                userInterfaceMessageWrite( "Temp: Over Limit" );
+            } else {
+                userInterfaceMessageWrite( "Temp: Below Limit" );
+            }
+        } else if( sirenStateRead() && !systemBlockedStateRead() ) {
+            if( !incorrectCodeStateRead() ) {
+                codeSequenceFromUserInterface[numberOfCodeChars] = keyReleased;
+                numberOfCodeChars++;
+                if( numberOfCodeChars >= CODE_NUMBER_OF_KEYS ) {
+                    codeComplete = true;
+                    numberOfCodeChars = 0;
+                }
+            } else {
+                if( keyReleased == '#' ) {
+                    numberOfHashKeyReleased++;
+                    if( numberOfHashKeyReleased >= 2 ) {
+                        numberOfHashKeyReleased = 0;
+                        numberOfCodeChars = 0;
+                        codeComplete = false;
+                        incorrectCodeState = OFF;
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void userInterfaceDisplayInit()
+{
+    displayInit( DISPLAY_CONNECTION_I2C_PCF8574_IO_EXPANDER );
+     
+    displayCharPositionWrite( 0, 0 );
+    displayStringWrite( "Temperature:" );
+
+    displayCharPositionWrite( 0, 1 );
+    displayStringWrite( "Gas:" );
+    
+    displayCharPositionWrite( 0, 2 );
+    displayStringWrite( "Alarm:" );
+
+    displayCharPositionWrite( 0, 3 );
+    displayStringWrite( "Enter Code to Deact." );
+}
+
+static void userInterfaceDisplayUpdate()
+{
+    static int accumulatedDisplayTime = 0;
+    char temperatureString[5] = "";
+    
+    if( accumulatedDisplayTime >= DISPLAY_REFRESH_TIME_MS ) {
+        accumulatedDisplayTime = 0;
+        
+        float tempC = temperatureSensorReadCelsius();
+        sprintf(temperatureString, "%.0f", tempC);
+        displayCharPositionWrite( 12, 0 );
+        displayStringWrite( temperatureString );
+        displayCharPositionWrite( 14, 0 );
+        displayStringWrite( "'C" );
+
+        float gasReading = gasSensorRead();
+        bool gasDetected = gasReading > GAS_SAFE_LIMIT;
+        char gasString[6] = "";
+        sprintf(gasString, "%.2f", gasReading);
+        displayCharPositionWrite( 4, 1 );
+        if( gasDetected ) {
+            displayStringWrite( "Det " );
+        } else {
+            displayStringWrite( "Safe " );
+        }
+        displayCharPositionWrite( 8, 1 );
+        displayStringWrite( gasString );
+        displayCharPositionWrite( 12, 1 );
+        displayStringWrite( "    " );
+
+        displayCharPositionWrite( 6, 2 );
+        if( sirenStateRead() ) {
+            displayStringWrite( "ON " );
+        } else {
+            displayStringWrite( "OFF" );
+        }
+
+        if( tempMessageTime >= MESSAGE_DISPLAY_TIME_MS ) {
+            tempMessage[0] = '\0';
+        }
+
+        if( tempMessage[0] != '\0' ) {
+            displayCharPositionWrite( 0, 3 );
+            displayStringWrite( tempMessage );
+        } else {
+            bool tempWarning = temperatureSensorReadCelsius() > TEMP_SAFE_LIMIT;
+            bool gasWarning = gasSensorRead() > GAS_SAFE_LIMIT;
+            
+            if( tempWarning && gasWarning ) {
+                strcpy( warningMessage, "WARNING: Temp+Gas!" );
+            } else if( tempWarning ) {
+                strcpy( warningMessage, "WARNING: High Temp!" );
+            } else if( gasWarning ) {
+                strcpy( warningMessage, "WARNING: Gas Detect!" );
+            } else {
+                warningMessage[0] = '\0';
+            }
+
+            displayCharPositionWrite( 0, 3 );
+            if( warningMessage[0] != '\0' ) {
+                displayStringWrite( warningMessage );
+            } else {
+                displayStringWrite( "Enter Code to Deact." );
+            }
+        }
+    } else {
+        accumulatedDisplayTime += SYSTEM_TIME_INCREMENT_MS;
+        tempMessageTime += SYSTEM_TIME_INCREMENT_MS;
+    }
+}
+
+static void incorrectCodeIndicatorUpdate()
+{
+    incorrectCodeLed = incorrectCodeStateRead();
+}
+
+static void systemBlockedIndicatorUpdate()
+{
+    systemBlockedLed = systemBlockedState;
+}

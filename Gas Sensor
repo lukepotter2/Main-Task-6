@@ -1,0 +1,68 @@
+//=====[#include guards - begin]===============================================
+
+#ifndef _GAS_SENSOR_H_
+#define _GAS_SENSOR_H_
+
+//=====[Declaration of public defines]=========================================
+
+#define GAS_SAFE_LIMIT 0.9
+
+//=====[Declaration of public data types]======================================
+
+//=====[Declarations (prototypes) of public functions]=========================
+
+void gasSensorInit();
+void gasSensorUpdate();
+float gasSensorRead(); // Changed to float for analog sensor
+bool gasSensorDetected(); // Added for binary status
+
+//=====[#include guards - end]=================================================
+
+#endif // _GAS_SENSOR_H_
+
+// Start of gas_sensor.cpp
+
+//=====[Libraries]=============================================================
+
+#include "mbed.h"
+#include "gas_sensor.h"
+
+//=====[Declaration of private defines]========================================
+
+//=====[Declaration of private data types]=====================================
+
+//=====[Declaration and initialization of public global objects]===============
+
+AnalogIn mq2(A3);
+
+//=====[Declaration of external public global variables]=======================
+
+//=====[Declaration and initialization of public global variables]=============
+
+//=====[Declaration and initialization of private global variables]============
+
+//=====[Declarations (prototypes) of private functions]========================
+
+//=====[Implementations of public functions]===================================
+
+void gasSensorInit()
+{
+}
+
+void gasSensorUpdate()
+{
+}
+
+float gasSensorRead()
+{
+    float value = mq2.read();
+    wait_us(1000); 
+    return value;
+}
+
+bool gasSensorDetected()
+{
+    return gasSensorRead() > GAS_SAFE_LIMIT;
+}
+
+//=====[Implementations of private functions]==================================
